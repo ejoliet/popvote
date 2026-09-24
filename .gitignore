@@ -1,0 +1,9 @@
+# Private keys — NEVER commit (see RDD security invariant)
+*.pem
+keys/
+*.license
+.env
+CLAUDE.local.md
+node_modules/
+.omx/
+.DS_Store
