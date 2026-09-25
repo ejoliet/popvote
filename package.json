@@ -1,0 +1,14 @@
+{
+  "name": "popvote",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Zero-backend live audience polling in a single HTML file.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\"",
+    "check": "node scripts/syntax-check.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  }
+}
