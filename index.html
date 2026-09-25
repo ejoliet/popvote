@@ -1,0 +1,1281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>popvote — live audience polling, no server</title>
+<meta name="description" content="Zero-backend live polls, word clouds, Q&A and ratings. Runs in the presenter's browser tab. Audience joins by QR. Data never leaves the room.">
+<style>
+:root{
+  --bg:#0f1117;--panel:#171a23;--panel2:#1f2330;--line:#2a2f3d;--fg:#e9ecf3;--muted:#8b93a7;
+  --accent:#ff5c7a;--accent2:#ffb347;--ok:#4ade80;--warn:#fbbf24;--bad:#f87171;
+  --c1:#ff5c7a;--c2:#ffb347;--c3:#4ade80;--c4:#60a5fa;--c5:#c084fc;--c6:#f472b6;--c7:#2dd4bf;--c8:#fb923c;
+  --radius:14px;--font:ui-sans-serif,-apple-system,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--font);line-height:1.4;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:0;border-radius:10px;padding:10px 16px;background:var(--panel2);color:var(--fg);transition:transform .08s,background .15s}
+button:hover{background:#2a3040}button:active{transform:scale(.97)}
+button.primary{background:var(--accent);color:#fff;font-weight:600}
+button.primary:hover{background:#ff7590}
+button.ghost{background:transparent;color:var(--muted)}button.ghost:hover{color:var(--fg);background:var(--panel2)}
+button.small{padding:6px 10px;font-size:13px;border-radius:8px}
+button:disabled{opacity:.45;cursor:not-allowed;transform:none}
+input,select,textarea{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;outline:0;width:100%}
+input:focus,textarea:focus,select:focus{border-color:var(--accent)}
+a{color:var(--accent2)}
+.hidden{display:none!important}
+.muted{color:var(--muted)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.spacer{flex:1}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
+.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;background:var(--panel2);color:var(--muted)}
+.badge.pro{background:linear-gradient(90deg,var(--accent),var(--accent2));color:#fff}
+.view{min-height:100%;padding:16px;max-width:1400px;margin:0 auto}
+h1,h2,h3{margin:0 0 8px;line-height:1.15}
+h1{font-size:clamp(28px,5vw,44px);letter-spacing:-.02em}
+h2{font-size:22px}h3{font-size:16px}
+.logo{font-weight:800;letter-spacing:-.03em;font-size:24px}
+.logo span{color:var(--accent)}
+/* home */
+#home{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:24px;min-height:100vh}
+#home .hero{max-width:640px}
+#home .cta{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+#home .join{display:flex;gap:8px;justify-content:center}
+#home .join input{width:140px;text-transform:uppercase;letter-spacing:.2em;text-align:center;font-weight:700;font-size:20px}
+.features{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;max-width:820px;width:100%;text-align:left}
+.features .card{padding:14px}.features .card b{display:block;margin-bottom:4px}
+/* host */
+#host{display:grid;grid-template-columns:300px 1fr 320px;grid-template-rows:auto 1fr;gap:14px;height:100vh;padding:14px}
+#host header{grid-column:1/-1;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+#host .code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:26px;font-weight:800;letter-spacing:.15em;background:var(--panel2);padding:6px 14px;border-radius:10px}
+#host aside,#host section,#host .qa{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px;overflow:auto;min-height:0}
+#host section{display:flex;flex-direction:column;position:relative}
+#acts{display:flex;flex-direction:column;gap:8px;margin:10px 0}
+.act{background:var(--panel2);border-radius:10px;padding:10px;display:flex;gap:8px;align-items:center;border:1px solid transparent}
+.act.active{border-color:var(--accent)}
+.act .t{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.act .k{font-size:11px;text-transform:uppercase;color:var(--muted);letter-spacing:.06em}
+.stage{flex:1;position:relative;min-height:320px}
+.stage canvas{width:100%;height:100%;display:block;border-radius:10px;background:var(--panel2)}
+.stage .empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);flex-direction:column;gap:12px;text-align:center;padding:24px}
+.stage .title{position:absolute;top:14px;left:18px;right:18px;font-size:clamp(18px,2.6vw,30px);font-weight:700;text-shadow:0 2px 8px rgba(0,0,0,.5);pointer-events:none}
+.stage .count{position:absolute;bottom:12px;left:18px;color:var(--muted);font-size:13px;pointer-events:none}
+#rx{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+#rx span{position:absolute;bottom:-40px;font-size:34px;animation:float 3.2s ease-out forwards}
+@keyframes float{0%{transform:translateY(0) scale(.6);opacity:0}10%{opacity:1;transform:scale(1)}100%{transform:translateY(-110vh) rotate(var(--r));opacity:0}}
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.joinbox{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.joinbox #qr{background:#fff;padding:8px;border-radius:10px;width:132px;height:132px;display:flex;align-items:center;justify-content:center}
+.joinbox #qr canvas,.joinbox #qr img{width:116px;height:116px;image-rendering:pixelated}
+.joinbox .url{font-family:ui-monospace,Menlo,monospace;font-size:13px;word-break:break-all;color:var(--muted)}
+.qlist{display:flex;flex-direction:column;gap:8px}
+.q{background:var(--panel2);border-radius:10px;padding:10px;display:flex;gap:10px;align-items:flex-start}
+.q.ans{opacity:.55}.q.hid{display:none}
+.q .up{font-weight:700;min-width:44px;text-align:center;background:var(--panel);border-radius:8px;padding:6px}
+.q .txt{flex:1;word-break:break-word}
+.q .n{font-size:12px;color:var(--muted)}
+.q .btns{display:flex;flex-direction:column;gap:4px}
+/* guest */
+#guest{max-width:520px;margin:0 auto;padding:16px;display:flex;flex-direction:column;gap:14px;min-height:100vh}
+#guest .status{font-size:13px;color:var(--muted)}
+.opts{display:flex;flex-direction:column;gap:10px}
+.opts button{padding:16px;font-size:18px;text-align:left;background:var(--panel2);border:2px solid transparent}
+.opts button.sel{border-color:var(--accent)}
+.ratings{display:flex;gap:8px}
+.ratings button{flex:1;font-size:22px;padding:18px 0;border:2px solid transparent}
+.ratings button.sel{border-color:var(--accent)}
+.rxbar{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:auto;padding-top:14px}
+.rxbar button{font-size:26px;padding:8px 12px;background:transparent}
+.result{display:flex;flex-direction:column;gap:6px}
+.result .bar{display:flex;align-items:center;gap:10px}
+.result .bar i{display:block;height:14px;border-radius:7px;background:var(--accent)}
+.cloudmini{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:baseline}
+/* modal + toast */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50}
+.modal .card{max-width:560px;width:100%;max-height:92vh;overflow:auto}
+.toasts{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);display:flex;flex-direction:column;gap:8px;z-index:60;pointer-events:none}
+.toast{background:#262b3a;border:1px solid var(--line);padding:10px 16px;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.4);animation:tin .2s ease-out;max-width:90vw}
+.toast.warn{border-color:var(--warn)}.toast.bad{border-color:var(--bad)}.toast.ok{border-color:var(--ok)}
+@keyframes tin{from{transform:translateY(10px);opacity:0}}
+.preview{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff;position:relative;height:200px}
+.preview iframe{width:200%;height:200%;transform:scale(.5);transform-origin:0 0;border:0;pointer-events:none}
+.preview::after{content:"";position:absolute;inset:0;background:linear-gradient(transparent 40%,var(--panel) 100%)}
+label.f{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+@media (max-width:1000px){#host{grid-template-columns:1fr;grid-template-rows:auto auto auto auto;height:auto}#host section{min-height:60vh}}
+</style>
+</head>
+<body>
+
+<!-- ===================== HOME ===================== -->
+<div id="home" class="view">
+  <div class="hero">
+    <div class="logo">pop<span>vote</span></div>
+    <h1>Live polls that never leave the room.</h1>
+    <p class="muted">Polls, word clouds, Q&amp;A and ratings — running entirely in your browser tab. No server, no accounts, no monthly meter. Your audience joins by QR.</p>
+    <div class="cta">
+      <button class="primary" id="btnNew">New session</button>
+    </div>
+    <p class="muted" style="margin-top:18px">Joining a session? Enter the room code:</p>
+    <form class="join" id="joinForm">
+      <input id="joinCode" maxlength="4" placeholder="CODE" autocomplete="off" autocapitalize="characters" spellcheck="false">
+      <button type="submit">Join</button>
+    </form>
+  </div>
+  <div class="features">
+    <div class="card"><b>Zero backend</b><span class="muted">Peer-to-peer. Host tab is the server.</span></div>
+    <div class="card"><b>Structurally private</b><span class="muted">Answers travel browser-to-browser. Nothing is uploaded.</span></div>
+    <div class="card"><b>Instant Recap</b><span class="muted">One click: a crisp offline HTML report of the whole session.</span></div>
+    <div class="card"><b>One-time price</b><span class="muted">Free for small rooms. Pro is a single purchase, not a subscription.</span></div>
+  </div>
+  <p class="muted" style="font-size:12px">Best with ~100 people or fewer. Needs an HTTPS page and a modern browser.</p>
+</div>
+
+<!-- ===================== HOST ===================== -->
+<div id="host" class="view hidden">
+  <header>
+    <div class="logo">pop<span>vote</span></div>
+    <div class="code" id="hCode">----</div>
+    <span class="badge" id="hPlan">Free</span>
+    <span class="muted" id="hGuests">0 guests</span>
+    <div class="spacer"></div>
+    <button class="ghost small" id="btnLicense">Enter license</button>
+    <button class="small" id="btnEnd">End session</button>
+  </header>
+
+  <aside>
+    <div class="joinbox">
+      <div id="qr"></div>
+      <div>
+        <div><b>Join at</b></div>
+        <div class="url" id="hUrl"></div>
+        <div class="row" style="margin-top:8px">
+          <button class="small" id="btnCopy">Copy link</button>
+          <button class="small hidden" id="btnShare">Share</button>
+        </div>
+      </div>
+    </div>
+    <h3 style="margin-top:16px">Activities <span class="badge" id="actCount"></span></h3>
+    <div id="acts"></div>
+    <button id="btnAdd" style="width:100%">+ Add activity</button>
+  </aside>
+
+  <section>
+    <div class="stage">
+      <canvas id="stage"></canvas>
+      <div class="title" id="stTitle"></div>
+      <div class="count" id="stCount"></div>
+      <div class="empty" id="stEmpty"><div>No activity is live.</div><div class="muted">Add one on the left and press <b>Start</b>.</div></div>
+      <div id="rx"></div>
+    </div>
+    <div class="controls" id="stControls"></div>
+  </section>
+
+  <div class="qa">
+    <h3>Q&amp;A <span class="badge" id="qaCount"></span></h3>
+    <div class="muted" id="qaHint" style="font-size:13px">Start a Q&amp;A activity to collect questions.</div>
+    <div class="qlist" id="qaList"></div>
+  </div>
+</div>
+
+<!-- ===================== GUEST ===================== -->
+<div id="guest" class="view hidden">
+  <div class="row"><div class="logo">pop<span>vote</span></div><div class="spacer"></div><span class="status" id="gStatus">Connecting…</span></div>
+  <div id="gMain" class="card"><div class="muted">Connecting to the room…</div></div>
+  <div class="rxbar" id="gRx"></div>
+  <div class="muted" style="text-align:center;font-size:12px">Peer-to-peer · nothing is uploaded</div>
+</div>
+
+<!-- ===================== MODALS ===================== -->
+<div id="addModal" class="modal hidden">
+  <form class="card" id="addForm">
+    <h2>New activity</h2>
+    <label class="f">Type</label>
+    <select id="aKind">
+      <option value="poll">Multiple choice poll</option>
+      <option value="cloud">Word cloud</option>
+      <option value="qa">Open Q&amp;A</option>
+      <option value="rating">Rating scale (1–5)</option>
+    </select>
+    <label class="f">Question / title</label>
+    <input id="aTitle" maxlength="120" placeholder="What should we cover next?" required>
+    <div id="aOptsWrap">
+      <label class="f">Options (one per line, 2–8)</label>
+      <textarea id="aOpts" rows="4" placeholder="Option A&#10;Option B&#10;Option C"></textarea>
+    </div>
+    <div class="row" style="margin-top:16px;justify-content:flex-end">
+      <button type="button" class="ghost" id="addCancel">Cancel</button>
+      <button type="submit" class="primary">Add</button>
+    </div>
+  </form>
+</div>
+
+<div id="endModal" class="modal hidden">
+  <div class="card">
+    <h2>End session</h2>
+    <p class="muted" id="endSummary"></p>
+    <div id="recapPro" class="hidden">
+      <p>Generate an <b>Instant Recap</b>: a single offline HTML file with every chart, the word clouds, ranked Q&amp;A and a participation timeline.</p>
+      <div class="preview"><iframe id="recapPreview" title="Recap preview" sandbox=""></iframe></div>
+      <div class="row" style="margin-top:14px">
+        <button class="primary" id="btnRecap">Generate Recap ↓</button>
+        <button class="ghost" id="btnEndNoRecap">End without recap</button>
+      </div>
+    </div>
+    <div id="recapFree" class="hidden">
+      <p><b>Instant Recap</b> is a Pro feature. Here is what yours would look like:</p>
+      <div class="preview"><iframe id="recapPreviewFree" title="Recap preview" sandbox=""></iframe></div>
+      <p class="muted" style="font-size:13px">Pro is a one-time purchase: unlimited activities, up to 100 guests and full Instant Recap for every session. Your license works offline forever.</p>
+      <div class="row" style="margin-top:14px">
+        <a class="primary" id="btnBuy" href="https://popvote.lemonsqueezy.com" target="_blank" rel="noopener" style="text-decoration:none;display:inline-block;padding:10px 16px;border-radius:10px;background:var(--accent);color:#fff;font-weight:600">Unlock Pro</a>
+        <button class="ghost" id="btnHaveKey">I have a license</button>
+        <button class="ghost" id="btnEndFree">End without recap</button>
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px"><button class="ghost small" id="endCancel">Back to session</button></div>
+  </div>
+</div>
+
+<div id="licModal" class="modal hidden">
+  <form class="card" id="licForm">
+    <h2>Pro license</h2>
+    <p class="muted">Paste the license key from your purchase email. It is verified offline; nothing is sent anywhere.</p>
+    <textarea id="licKey" rows="4" placeholder="PV1.…" spellcheck="false"></textarea>
+    <div class="muted" id="licMsg" style="margin-top:8px;font-size:13px"></div>
+    <div class="row" style="margin-top:14px;justify-content:flex-end">
+      <button type="button" class="ghost" id="licCancel">Cancel</button>
+      <button type="submit" class="primary">Activate</button>
+    </div>
+  </form>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.5/peerjs.min.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js" crossorigin="anonymous"></script>
+<script>
+/* =====================================================================
+   popvote core — pure, testable functions. No DOM, no PeerJS in here.
+   Exposed as window.PV so the jsdom test suite can load this file and
+   exercise the same code that ships. AIDEV-NOTE: everything used by
+   the Instant Recap lives here so recap + live view share one layout.
+   ===================================================================== */
+(function (root) {
+'use strict';
+const PV = {};
+
+/* ---------- PRNG + hashing ---------- */
+// AIDEV-NOTE: mulberry32 — tiny seeded PRNG; host live view and recap must
+// produce identical word-cloud placement, so never use Math.random for layout.
+PV.mulberry32 = function (seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+};
+PV.hashSeed = function (str) { // FNV-1a 32-bit
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return h >>> 0;
+};
+
+/* ---------- room codes ---------- */
+PV.CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/l/I
+PV.roomCode = function (rand) {
+  rand = rand || (function () {
+    if (root.crypto && root.crypto.getRandomValues) {
+      return function () { const u = new Uint32Array(1); root.crypto.getRandomValues(u); return u[0] / 4294967296; };
+    }
+    return Math.random;
+  })();
+  let s = '';
+  for (let i = 0; i < 4; i++) s += PV.CODE_ALPHABET[Math.floor(rand() * PV.CODE_ALPHABET.length)];
+  return s;
+};
+PV.normalizeCode = function (s) {
+  return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/O/g, '0').replace(/0/g, 'O').replace(/[1lI]/g, 'I').slice(0, 4);
+};
+PV.isValidCode = function (s) { return /^[A-Z2-9]{4}$/.test(s) && [...s].every(c => PV.CODE_ALPHABET.includes(c)); };
+PV.peerIdFor = function (code) { return 'popvote-' + code; };
+
+/* ---------- storage (localStorage pv.* with in-memory fallback) ---------- */
+PV.createStore = function (ls) {
+  const mem = new Map();
+  let backend = null;
+  try {
+    ls = ls === undefined ? root.localStorage : ls;
+    if (ls) { ls.setItem('pv.__probe', '1'); ls.removeItem('pv.__probe'); backend = ls; }
+  } catch (e) { backend = null; } // AIDEV-NOTE: sandboxed/preview iframes throw on access
+  const key = k => 'pv.' + k;
+  return {
+    usingMemory: !backend,
+    get(k, dflt) {
+      try {
+        const raw = backend ? backend.getItem(key(k)) : mem.get(key(k));
+        return raw == null ? dflt : JSON.parse(raw);
+      } catch (e) { return dflt; }
+    },
+    set(k, v) {
+      const raw = JSON.stringify(v);
+      try { if (backend) backend.setItem(key(k), raw); else mem.set(key(k), raw); }
+      catch (e) { mem.set(key(k), raw); }
+    },
+    del(k) { try { if (backend) backend.removeItem(key(k)); } catch (e) {} mem.delete(key(k)); }
+  };
+};
+
+/* ---------- text helpers ---------- */
+PV.esc = function (s) { // for recap HTML string building ONLY; live UI uses textContent
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+};
+PV.normalizeMsg = function (data) {
+  // AIDEV-NOTE: PeerJS may deliver ArrayBuffer/Uint8Array (binary serialization or
+  // browser quirks); always normalize to string before JSON.parse.
+  if (typeof data === 'string') return data;
+  if (data instanceof ArrayBuffer) return new TextDecoder().decode(new Uint8Array(data));
+  if (ArrayBuffer.isView(data)) return new TextDecoder().decode(data);
+  if (data && typeof data === 'object') return JSON.stringify(data);
+  return String(data);
+};
+PV.normalizeWord = function (s) { return String(s).trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 30); };
+
+/* ---------- limits ---------- */
+PV.LIMITS = {
+  msgBytes: 2048, msgsPerSec: 5, rxPerSec: 1, qaMax: 200, qTextMax: 500, qTextUi: 240,
+  wordMax: 30, nameMax: 40, optMax: 8, freeActivities: 3, freeGuests: 30, proGuests: 100
+};
+PV.plan = function (pro) {
+  return pro
+    ? { name: 'Pro', maxActivities: Infinity, maxGuests: PV.LIMITS.proGuests, recap: true }
+    : { name: 'Free', maxActivities: PV.LIMITS.freeActivities, maxGuests: PV.LIMITS.freeGuests, recap: false };
+};
+
+/* ---------- hub: host-authoritative session state ---------- */
+// AIDEV-NOTE: the hub is a pure state machine. handle() returns effects; the
+// PeerJS layer applies them. This is what the 100-guest fan-in test exercises.
+PV.createHub = function (opts) {
+  opts = opts || {};
+  const hub = {
+    maxGuests: opts.maxGuests || PV.LIMITS.freeGuests,
+    startedAt: opts.now || 0,
+    guests: new Map(),       // pid -> {name, joinedAt}
+    peak: 0,
+    activities: [],          // see addActivity
+    activeId: null,
+    events: [],              // {t, k} for participation timeline
+    rate: new Map(),         // pid -> [timestamps]
+    rxLast: new Map(),       // pid -> last reaction ts
+    dropped: { oversize: 0, rate: 0, bad: 0 },
+    qseq: 0
+  };
+  const byId = id => hub.activities.find(a => a.id === id);
+  hub.getActivity = byId;
+  hub.active = () => byId(hub.activeId);
+
+  hub.addActivity = function (a) {
+    const act = {
+      id: a.id || ('a' + (hub.activities.length + 1) + '-' + Math.floor((opts.rand || Math.random)() * 1e6).toString(36)),
+      kind: a.kind, title: String(a.title || '').slice(0, 120),
+      opts: a.kind === 'poll' ? (a.opts || []).map(o => String(o).slice(0, 80)).slice(0, PV.LIMITS.optMax) : undefined,
+      votes: new Map(), questions: [], closed: false, revealed: false, startedAt: null
+    };
+    hub.activities.push(act);
+    return act;
+  };
+  hub.removeActivity = function (id) {
+    hub.activities = hub.activities.filter(a => a.id !== id);
+    if (hub.activeId === id) hub.activeId = null;
+  };
+  hub.move = function (id, dir) {
+    const i = hub.activities.findIndex(a => a.id === id), j = i + dir;
+    if (i < 0 || j < 0 || j >= hub.activities.length) return;
+    const t = hub.activities[i]; hub.activities[i] = hub.activities[j]; hub.activities[j] = t;
+  };
+  hub.activate = function (id, now) {
+    const a = byId(id); if (!a) return;
+    hub.activities.forEach(x => { if (x.id !== id && x.id === hub.activeId) x.closed = true; });
+    a.closed = false; a.startedAt = a.startedAt || now || 0;
+    hub.activeId = id;
+  };
+  hub.close = function (now) { const a = hub.active(); if (a) a.closed = true; };
+  hub.stateMsg = function () {
+    const a = hub.active();
+    if (!a) return { t: 'state', act: null };
+    const m = { t: 'state', act: { id: a.id, kind: a.kind, title: a.title } };
+    if (a.opts) m.act.opts = a.opts;
+    if (a.closed) m.closed = true;
+    return m;
+  };
+  hub.qsMsg = function (a) {
+    return { t: 'qs', a: a.id, list: a.questions.filter(q => !q.hidden).map(q => ({ qid: q.qid, txt: q.txt, n: q.n, up: q.up.size, ans: !!q.ans })) };
+  };
+  hub.addGuest = function (pid, now) {
+    if (hub.guests.has(pid)) return true;
+    if (hub.guests.size >= hub.maxGuests) return false;
+    hub.guests.set(pid, { name: '', joinedAt: now || 0 });
+    hub.peak = Math.max(hub.peak, hub.guests.size);
+    return true;
+  };
+  hub.removeGuest = function (pid) { hub.guests.delete(pid); hub.rate.delete(pid); hub.rxLast.delete(pid); };
+
+  function rateOk(pid, now) {
+    let arr = hub.rate.get(pid);
+    if (!arr) { arr = []; hub.rate.set(pid, arr); }
+    while (arr.length && now - arr[0] >= 1000) arr.shift();
+    if (arr.length >= PV.LIMITS.msgsPerSec) return false;
+    arr.push(now);
+    return true;
+  }
+
+  // Returns {effects:[...]} ; effect kinds: 'send'(to,msg) 'rx'(e) 'qs'(a) 'changed'(a) 'name'
+  hub.handle = function (pid, raw, now) {
+    now = now || 0;
+    const effects = [];
+    const str = PV.normalizeMsg(raw);
+    if (str.length > PV.LIMITS.msgBytes) { hub.dropped.oversize++; return { drop: 'oversize', effects }; }
+    if (!rateOk(pid, now)) { hub.dropped.rate++; return { drop: 'rate', effects }; }
+    let m;
+    try { m = JSON.parse(str); } catch (e) { hub.dropped.bad++; return { drop: 'parse', effects }; }
+    if (!m || typeof m !== 'object' || typeof m.t !== 'string') { hub.dropped.bad++; return { drop: 'shape', effects }; }
+    const g = hub.guests.get(pid);
+    if (!g) return { drop: 'unknown-guest', effects };
+
+    switch (m.t) {
+      case 'hi': {
+        if (typeof m.n === 'string' && m.n.trim()) g.name = m.n.trim().slice(0, PV.LIMITS.nameMax);
+        effects.push({ kind: 'send', to: pid, msg: hub.stateMsg() });
+        const a = hub.active();
+        if (a && a.kind === 'qa') effects.push({ kind: 'send', to: pid, msg: hub.qsMsg(a) });
+        if (a && a.revealed) effects.push({ kind: 'send', to: pid, msg: { t: 'reveal', a: a.id, agg: PV.aggregate(a) } });
+        break;
+      }
+      case 'vote': {
+        const a = byId(m.a);
+        if (!a || a.id !== hub.activeId || a.closed || a.kind === 'qa') return { drop: 'inactive', effects };
+        let v = m.v;
+        if (a.kind === 'poll') { v = Number(v); if (!Number.isInteger(v) || v < 0 || v >= a.opts.length) return { drop: 'range', effects }; }
+        else if (a.kind === 'rating') { v = Number(v); if (!Number.isInteger(v) || v < 1 || v > 5) return { drop: 'range', effects }; }
+        else if (a.kind === 'cloud') { v = PV.normalizeWord(v); if (!v) return { drop: 'empty', effects }; }
+        a.votes.set(pid, v); // AIDEV-NOTE: one vote per guest; re-vote replaces
+        hub.events.push({ t: now, k: 'vote' });
+        effects.push({ kind: 'changed', a: a.id });
+        break;
+      }
+      case 'q': {
+        const a = byId(m.a);
+        if (!a || a.id !== hub.activeId || a.closed || a.kind !== 'qa') return { drop: 'inactive', effects };
+        if (typeof m.txt !== 'string') return { drop: 'shape', effects };
+        const txt = m.txt.trim();
+        if (!txt || txt.length > PV.LIMITS.qTextMax) return { drop: 'length', effects };
+        if (a.questions.length >= PV.LIMITS.qaMax) return { drop: 'qa-full', effects };
+        const n = (typeof m.n === 'string' ? m.n.trim() : '').slice(0, PV.LIMITS.nameMax) || g.name || 'Anonymous';
+        if (!g.name && n !== 'Anonymous') g.name = n;
+        const q = { qid: 'q' + (++hub.qseq), txt, n, up: new Set([pid]), ans: false, hidden: false, pid, t: now };
+        a.questions.push(q);
+        hub.events.push({ t: now, k: 'q' });
+        effects.push({ kind: 'qs', a: a.id });
+        break;
+      }
+      case 'up': {
+        const a = byId(m.a);
+        if (!a || a.kind !== 'qa') return { drop: 'inactive', effects };
+        const q = a.questions.find(x => x.qid === m.qid);
+        if (!q || q.hidden) return { drop: 'noq', effects };
+        if (q.up.has(pid)) return { drop: 'dupe', effects }; // AIDEV-NOTE: upvote dedupe per guest per question
+        q.up.add(pid);
+        hub.events.push({ t: now, k: 'up' });
+        effects.push({ kind: 'qs', a: a.id });
+        break;
+      }
+      case 'rx': {
+        const last = hub.rxLast.has(pid) ? hub.rxLast.get(pid) : -1e9;
+        if (now - last < 1000 / PV.LIMITS.rxPerSec) return { drop: 'rx-rate', effects };
+        const e = PV.REACTIONS.includes(m.e) ? m.e : null;
+        if (!e) return { drop: 'rx-bad', effects };
+        hub.rxLast.set(pid, now);
+        effects.push({ kind: 'rx', e });
+        break;
+      }
+      default: hub.dropped.bad++; return { drop: 'type', effects };
+    }
+    return { effects };
+  };
+
+  // host-side Q&A moderation
+  hub.markAnswered = function (aid, qid, val) { const a = byId(aid); const q = a && a.questions.find(x => x.qid === qid); if (q) q.ans = val === undefined ? !q.ans : !!val; };
+  hub.hideQuestion = function (aid, qid) { const a = byId(aid); const q = a && a.questions.find(x => x.qid === qid); if (q) q.hidden = true; };
+
+  hub.export = function (meta) {
+    // Plain JSON snapshot used by the recap builder (and tests).
+    return {
+      title: (meta && meta.title) || 'popvote session',
+      code: (meta && meta.code) || '',
+      startedAt: hub.startedAt, endedAt: (meta && meta.endedAt) || 0,
+      peak: hub.peak, guests: hub.guests.size,
+      activities: hub.activities.map(a => ({
+        id: a.id, kind: a.kind, title: a.title, opts: a.opts, responses: a.kind === 'qa' ? a.questions.length : a.votes.size,
+        agg: PV.aggregate(a),
+        questions: a.kind === 'qa' ? a.questions.filter(q => !q.hidden).map(q => ({ qid: q.qid, txt: q.txt, n: q.n, up: q.up.size, ans: q.ans })) : undefined
+      })),
+      events: hub.events.slice()
+    };
+  };
+  return hub;
+};
+PV.REACTIONS = ['👏', '❤️', '😂', '🤯', '👍', '🔥'];
+
+/* ---------- aggregation ---------- */
+PV.aggregate = function (a) {
+  if (a.kind === 'poll') {
+    const counts = a.opts.map(() => 0);
+    a.votes.forEach(v => { counts[v]++; });
+    return { counts, total: a.votes.size };
+  }
+  if (a.kind === 'rating') {
+    const counts = [0, 0, 0, 0, 0]; let sum = 0;
+    a.votes.forEach(v => { counts[v - 1]++; sum += v; });
+    return { counts, total: a.votes.size, avg: a.votes.size ? sum / a.votes.size : 0 };
+  }
+  if (a.kind === 'cloud') {
+    const map = new Map();
+    a.votes.forEach(v => map.set(v, (map.get(v) || 0) + 1));
+    const words = [...map].map(([text, count]) => ({ text, count })).sort((x, y) => y.count - x.count || (x.text < y.text ? -1 : 1));
+    return { words, total: a.votes.size };
+  }
+  if (a.kind === 'qa') {
+    return { total: a.questions.length, answered: a.questions.filter(q => q.ans).length };
+  }
+  return {};
+};
+
+/* ---------- layouts (shared by canvas live view and SVG recap) ---------- */
+PV.PALETTE = ['#ff5c7a', '#ffb347', '#4ade80', '#60a5fa', '#c084fc', '#f472b6', '#2dd4bf', '#fb923c'];
+
+// AIDEV-NOTE: layoutWordCloud is THE determinism seam. Same (words,w,h,seed) →
+// same placement, in the host canvas and in the recap SVG. Text metrics are
+// approximated (0.58em per char) rather than measured so no canvas is needed.
+PV.layoutWordCloud = function (words, w, h, seed) {
+  const rand = PV.mulberry32(seed >>> 0);
+  const sorted = words.slice().sort((a, b) => b.count - a.count || (a.text < b.text ? -1 : 1));
+  if (!sorted.length) return [];
+  const max = sorted[0].count, min = sorted[sorted.length - 1].count;
+  const minS = Math.max(12, Math.min(w, h) / 28), maxS = Math.max(minS + 6, Math.min(w, h) / 6);
+  const placed = [];
+  const measure = (text, size) => ({ w: text.length * size * 0.58 + size * 0.4, h: size * 1.15 });
+  const hits = (r) => placed.some(p => !(r.x + r.w < p.x || p.x + p.w < r.x || r.y + r.h < p.y || p.y + p.h < r.y));
+  const sizeOf = wd => max === min ? (minS + maxS) / 2 : minS + (maxS - minS) * Math.pow((wd.count - min) / (max - min), 0.7);
+  // AIDEV-NOTE: adaptive scale — if the words' total box area would exceed ~40% of the
+  // canvas, shrink every size by the same factor so crowded clouds still fit.
+  const area = sorted.reduce((sum, wd) => { const m = measure(wd.text, sizeOf(wd)); return sum + m.w * m.h; }, 0);
+  const k = Math.min(1, Math.sqrt(0.4 * w * h / Math.max(1, area)));
+  for (const wd of sorted) {
+    const size = Math.max(9, sizeOf(wd) * k);
+    const m = measure(wd.text, size);
+    const a0 = rand() * Math.PI * 2, dir = rand() < 0.5 ? 1 : -1;
+    let ok = null;
+    for (let i = 0; i < 3000; i++) {
+      const t = i * 0.2, r = 0.5 * t;
+      const cx = w / 2 + r * Math.cos(a0 + dir * t) * (w / h) * 1.4, cy = h / 2 + r * Math.sin(a0 + dir * t); // AIDEV-NOTE: stretched spiral: text rects are wide, so spread x faster than y
+      const rect = { x: cx - m.w / 2, y: cy - m.h / 2, w: m.w, h: m.h };
+      if (rect.x < 4 || rect.y < 4 || rect.x + rect.w > w - 4 || rect.y + rect.h > h - 4) continue;
+      if (!hits(rect)) { ok = rect; break; }
+    }
+    if (!ok) continue;
+    placed.push(ok);
+    ok.text = wd.text; ok.count = wd.count; ok.size = size;
+    ok.cx = ok.x + ok.w / 2; ok.cy = ok.y + ok.h / 2;
+    ok.color = PV.PALETTE[placed.length % PV.PALETTE.length];
+  }
+  return placed;
+};
+
+PV.layoutBars = function (labels, counts, w, h) {
+  const total = counts.reduce((a, b) => a + b, 0), max = Math.max(1, ...counts);
+  const pad = 16, labelW = Math.min(w * 0.38, 260), rowH = Math.min(56, (h - pad * 2) / Math.max(1, labels.length));
+  const winIdx = total ? counts.indexOf(max) : -1;
+  return {
+    total, rows: labels.map((label, i) => ({
+      label, count: counts[i], pct: total ? counts[i] / total : 0,
+      x: pad + labelW, y: pad + i * rowH + rowH * 0.15, w: (w - pad * 2 - labelW - 64) * (counts[i] / max), h: rowH * 0.7, rowH,
+      labelX: pad, win: i === winIdx && counts[i] > 0, color: PV.PALETTE[i % PV.PALETTE.length]
+    }))
+  };
+};
+
+PV.layoutDist = function (counts, w, h) { // 1..5 rating distribution, vertical bars
+  const total = counts.reduce((a, b) => a + b, 0), max = Math.max(1, ...counts);
+  const pad = 20, gap = 14, bw = (w - pad * 2 - gap * 4) / 5, top = 30, bottom = 40;
+  const avg = total ? counts.reduce((s, c, i) => s + c * (i + 1), 0) / total : 0;
+  return {
+    total, avg, bars: counts.map((c, i) => ({
+      label: String(i + 1), count: c, x: pad + i * (bw + gap), w: bw,
+      h: (h - top - bottom) * (c / max), y: h - bottom - (h - top - bottom) * (c / max), color: PV.PALETTE[(i + 3) % PV.PALETTE.length]
+    }))
+  };
+};
+
+// responses/minute buckets → sparkline points
+PV.timeline = function (events, startedAt, endedAt) {
+  const t0 = startedAt || (events[0] ? events[0].t : 0), t1 = Math.max(endedAt || 0, t0 + 60000, ...events.map(e => e.t));
+  const mins = Math.max(1, Math.ceil((t1 - t0) / 60000));
+  const buckets = new Array(mins).fill(0);
+  for (const e of events) { const i = Math.min(mins - 1, Math.max(0, Math.floor((e.t - t0) / 60000))); buckets[i]++; }
+  return buckets;
+};
+
+/* ---------- SVG renderers (recap) ---------- */
+const svgOpen = (w, h, cls) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="100%" class="${cls}" role="img">`;
+PV.svgBars = function (labels, counts, w, h) {
+  w = w || 720; h = h || Math.max(120, 16 * 2 + labels.length * 52);
+  const L = PV.layoutBars(labels, counts, w, h);
+  let s = svgOpen(w, h, 'pv-bars');
+  L.rows.forEach(r => {
+    const ty = r.y + r.h / 2 + 5;
+    s += `<text x="${r.labelX}" y="${ty}" font-size="15" font-weight="${r.win ? 700 : 500}" fill="${r.win ? '#111' : '#444'}">${PV.esc(r.label)}</text>`;
+    s += `<rect x="${r.x}" y="${r.y}" width="${Math.max(2, r.w).toFixed(1)}" height="${r.h.toFixed(1)}" rx="6" fill="${r.color}" opacity="${r.win || L.total === 0 ? 1 : 0.55}"/>`;
+    s += `<text x="${(r.x + Math.max(2, r.w) + 10).toFixed(1)}" y="${ty}" font-size="14" fill="#333">${r.count} · ${Math.round(r.pct * 100)}%${r.win ? ' ★' : ''}</text>`;
+  });
+  return s + '</svg>';
+};
+PV.svgCloud = function (words, w, h, seed) {
+  w = w || 720; h = h || 400;
+  const L = PV.layoutWordCloud(words, w, h, seed);
+  let s = svgOpen(w, h, 'pv-cloud');
+  L.forEach(p => {
+    s += `<text x="${p.cx.toFixed(1)}" y="${(p.cy + p.size * 0.35).toFixed(1)}" text-anchor="middle" font-size="${p.size.toFixed(1)}" font-weight="700" fill="${p.color}">${PV.esc(p.text)}</text>`;
+  });
+  return s + '</svg>';
+};
+PV.svgDist = function (counts, w, h) {
+  w = w || 520; h = h || 220;
+  const L = PV.layoutDist(counts, w, h);
+  let s = svgOpen(w, h, 'pv-dist');
+  L.bars.forEach(b => {
+    s += `<rect x="${b.x.toFixed(1)}" y="${b.y.toFixed(1)}" width="${b.w.toFixed(1)}" height="${Math.max(2, b.h).toFixed(1)}" rx="6" fill="${b.color}"/>`;
+    s += `<text x="${(b.x + b.w / 2).toFixed(1)}" y="${h - 16}" text-anchor="middle" font-size="15" fill="#444">${b.label}</text>`;
+    s += `<text x="${(b.x + b.w / 2).toFixed(1)}" y="${(b.y - 6).toFixed(1)}" text-anchor="middle" font-size="13" fill="#333">${b.count}</text>`;
+  });
+  return s + '</svg>';
+};
+PV.svgSparkline = function (buckets, w, h) {
+  w = w || 720; h = h || 90;
+  const max = Math.max(1, ...buckets), pad = 6, n = buckets.length;
+  const pts = buckets.map((v, i) => [pad + (n === 1 ? (w - pad * 2) / 2 : (w - pad * 2) * i / (n - 1)), h - pad - (h - pad * 2) * v / max]);
+  const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+  const area = line + ` L${pts[pts.length - 1][0].toFixed(1)} ${h - pad} L${pts[0][0].toFixed(1)} ${h - pad} Z`;
+  let s = svgOpen(w, h, 'pv-spark');
+  s += `<path d="${area}" fill="#ff5c7a" opacity=".12"/><path d="${line}" fill="none" stroke="#ff5c7a" stroke-width="2.5" stroke-linejoin="round"/>`;
+  pts.forEach((p, i) => { if (buckets[i] === max && max > 0) s += `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="4" fill="#ff5c7a"/>`; });
+  return s + '</svg>';
+};
+
+root.PV = PV;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<script>
+/* =====================================================================
+   Instant Recap builder + offline Ed25519 license verification.
+   ===================================================================== */
+(function (root) {
+'use strict';
+const PV = root.PV;
+
+const KIND_LABEL = { poll: 'Poll', cloud: 'Word cloud', qa: 'Q&A', rating: 'Rating' };
+const fmtDate = ts => { const d = new Date(ts || Date.now()); return d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); };
+const fmtDur = ms => { const m = Math.max(1, Math.round(ms / 60000)); return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + (m % 60) + ' min'; };
+const esc = s => PV.esc(s);
+
+// AIDEV-NOTE: recap is a plain string build. Every user-provided value goes
+// through PV.esc; SVGs come from the same layout functions as the live view.
+PV.buildRecap = function (S) {
+  const totalResponses = S.activities.reduce((n, a) => n + (a.responses || 0), 0);
+  const buckets = PV.timeline(S.events || [], S.startedAt, S.endedAt);
+  const durMs = (S.endedAt || 0) - (S.startedAt || 0);
+  let acts = '';
+  S.activities.forEach((a, i) => {
+    let chart = '', meta = '';
+    if (a.kind === 'poll') {
+      chart = PV.svgBars(a.opts, a.agg.counts);
+      const max = Math.max(...a.agg.counts), wi = a.agg.counts.indexOf(max);
+      meta = a.agg.total ? `Winner: <b>${esc(a.opts[wi])}</b> (${Math.round(100 * max / a.agg.total)}%)` : 'No responses';
+    } else if (a.kind === 'cloud') {
+      chart = a.agg.words.length ? PV.svgCloud(a.agg.words, 720, 400, PV.hashSeed(a.id)) : '<p class="empty">No words submitted.</p>';
+      meta = a.agg.words.length ? `${a.agg.words.length} distinct words · top: <b>${esc(a.agg.words[0].text)}</b>` : '';
+    } else if (a.kind === 'rating') {
+      chart = PV.svgDist(a.agg.counts);
+      meta = a.agg.total ? `Average <b>${a.agg.avg.toFixed(2)}</b> / 5` : 'No responses';
+    } else if (a.kind === 'qa') {
+      meta = `${a.agg.total} questions · ${a.agg.answered} answered`;
+      const qs = (a.questions || []).slice().sort((x, y) => y.up - x.up || x.qid.localeCompare(y.qid));
+      chart = qs.length ? '<ol class="qa">' + qs.map(q =>
+        `<li${q.ans ? ' class="ans"' : ''}><span class="up">▲ ${q.up}</span><div><div class="qt">${esc(q.txt)}</div><div class="qn">${esc(q.n)}${q.ans ? ' <span class="badge">answered</span>' : ''}</div></div></li>`).join('') + '</ol>'
+        : '<p class="empty">No questions were asked.</p>';
+    }
+    acts += `<section class="act"><div class="k">${i + 1} · ${KIND_LABEL[a.kind] || a.kind}</div><h2>${esc(a.title)}</h2><div class="meta">${a.responses} ${a.kind === 'qa' ? 'questions' : 'responses'}${meta ? ' · ' + meta : ''}</div>${chart}</section>`;
+  });
+
+  // AIDEV-NOTE: system font stack + inline everything → opens offline forever, prints cleanly.
+  return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(S.title)} — popvote recap</title>
+<style>
+:root{color-scheme:light}
+body{margin:0;background:#f6f7fb;color:#1a1d26;font:16px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+main{max-width:820px;margin:0 auto;padding:40px 24px 60px}
+header{margin-bottom:36px}
+header .eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#ff5c7a;font-weight:700}
+h1{font-size:34px;line-height:1.15;letter-spacing:-.02em;margin:6px 0 10px}
+.sub{color:#5b6274}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-top:22px}
+.stat{background:#fff;border:1px solid #e6e8ef;border-radius:14px;padding:14px 16px}
+.stat b{display:block;font-size:26px;letter-spacing:-.02em}
+.stat span{font-size:13px;color:#5b6274}
+section.act{background:#fff;border:1px solid #e6e8ef;border-radius:16px;padding:26px 28px;margin:18px 0;page-break-inside:avoid}
+section.act .k{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#8b93a7;font-weight:600}
+section.act h2{font-size:22px;margin:4px 0 6px;letter-spacing:-.01em}
+section.act .meta{color:#5b6274;font-size:14px;margin-bottom:16px}
+svg{display:block;max-width:100%;height:auto}
+svg text{font-family:inherit}
+.pv-cloud{background:#fafbfe;border-radius:12px}
+.empty{color:#8b93a7;font-style:italic}
+ol.qa{list-style:none;padding:0;margin:0}
+ol.qa li{display:flex;gap:14px;align-items:flex-start;padding:12px 0;border-top:1px solid #eef0f5}
+ol.qa li:first-child{border-top:0}
+ol.qa .up{flex:0 0 58px;text-align:center;font-weight:700;background:#f1f2f7;border-radius:8px;padding:6px 0;font-size:14px}
+ol.qa .qt{font-weight:500}
+ol.qa .qn{font-size:13px;color:#8b93a7;margin-top:2px}
+ol.qa li.ans .qt{color:#5b6274}
+.badge{display:inline-block;background:#e6f9ee;color:#15803d;font-size:11px;font-weight:700;padding:1px 8px;border-radius:999px;letter-spacing:.04em}
+section.timeline h2{font-size:18px;margin:0 0 4px}
+section.timeline p{margin:0 0 10px;color:#5b6274;font-size:14px}
+footer{margin-top:40px;text-align:center;color:#8b93a7;font-size:13px}
+footer a{color:#ff5c7a;font-weight:700;text-decoration:none}
+@media print{body{background:#fff}main{padding:0}section.act{border:0;padding:12px 0}}
+</style></head>
+<body><main>
+<header>
+<div class="eyebrow">Session recap</div>
+<h1>${esc(S.title)}</h1>
+<div class="sub">${fmtDate(S.startedAt)}${durMs > 0 ? ' · ' + fmtDur(durMs) : ''}${S.code ? ' · room ' + esc(S.code) : ''}</div>
+<div class="stats">
+<div class="stat"><b>${S.peak}</b><span>peak participants</span></div>
+<div class="stat"><b>${totalResponses}</b><span>total responses</span></div>
+<div class="stat"><b>${S.activities.length}</b><span>activities</span></div>
+</div>
+</header>
+${acts || '<section class="act"><p class="empty">No activities were run.</p></section>'}
+<section class="act timeline"><h2>Participation</h2><p>Responses per minute across the session</p>${PV.svgSparkline(buckets)}</section>
+<footer>Made with <a href="https://popvote.app">popvote</a> — live polls that never leave the room.</footer>
+</main></body></html>`;
+};
+
+PV.recapFilename = function (S) {
+  const d = new Date(S.startedAt || Date.now());
+  const ymd = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  return `popvote-recap-${ymd}-${(S.code || 'session').toLowerCase()}.html`;
+};
+
+/* ---------- license ---------- */
+// AIDEV-NOTE: key format PV1.<b64url payload>.<b64url sig>. The signature is over
+// the UTF-8 bytes of the base64url payload STRING (not the raw JSON) so there is
+// exactly one canonical byte sequence to verify. See scripts/sign-license.mjs.
+// PV_PUBLIC_KEY is the raw 32-byte Ed25519 public key, base64url. Replace after
+// running scripts/keygen.mjs (private half stays local; see .gitignore).
+PV.PUBLIC_KEY = 'Q5oAYkoQ_WOpASAMp8V6b1g2TDnvNCzMlSJ3easMlsQ';
+
+const b64uToBytes = s => {
+  s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '=';
+  const bin = atob(s); const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+};
+PV.license = {
+  parse(key) {
+    const parts = String(key || '').trim().split('.');
+    if (parts.length !== 3 || parts[0] !== 'PV1' || !/^[A-Za-z0-9_-]+$/.test(parts[1]) || !/^[A-Za-z0-9_-]+$/.test(parts[2])) return null;
+    let payload;
+    try { payload = JSON.parse(new TextDecoder().decode(b64uToBytes(parts[1]))); } catch (e) { return null; }
+    if (!payload || typeof payload !== 'object') return null;
+    return { payloadB64: parts[1], sig: parts[2], payload };
+  },
+  async verify(key, pubB64u, nowSec) {
+    const p = PV.license.parse(key);
+    if (!p) return { ok: false, reason: 'format' };
+    const subtle = root.crypto && root.crypto.subtle;
+    if (!subtle) return { ok: false, reason: 'unsupported' };
+    let ok = false;
+    try {
+      const pub = await subtle.importKey('raw', b64uToBytes(pubB64u || PV.PUBLIC_KEY), { name: 'Ed25519' }, false, ['verify']);
+      ok = await subtle.verify({ name: 'Ed25519' }, pub, b64uToBytes(p.sig), new TextEncoder().encode(p.payloadB64));
+    } catch (e) { return { ok: false, reason: 'unsupported' }; }
+    if (!ok) return { ok: false, reason: 'signature' };
+    if (p.payload.plan !== 'pro') return { ok: false, reason: 'plan' };
+    const now = nowSec || Math.floor(Date.now() / 1000);
+    if (p.payload.exp && p.payload.exp < now) return { ok: false, reason: 'expired' };
+    return { ok: true, payload: p.payload };
+  }
+};
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<script>
+/* =====================================================================
+   UI + PeerJS transport. Host = hub owner; guests hold nothing durable.
+   ===================================================================== */
+(function () {
+'use strict';
+if (typeof document === 'undefined' || !document.getElementById('home')) return;
+const PV = window.PV;
+const $ = id => document.getElementById(id);
+const store = PV.createStore();
+const PEER_OPTS = () => Object.assign({ debug: 0 }, window.POPVOTE_PEER_OPTIONS || {}); // AIDEV-NOTE: Pro self-hosted signaling seam
+const now = () => Date.now();
+
+/* ---------- tiny UI helpers ---------- */
+function toast(msg, cls, ms) {
+  const el = document.createElement('div'); el.className = 'toast ' + (cls || ''); el.textContent = msg;
+  $('toasts').appendChild(el); setTimeout(() => el.remove(), ms || 3200);
+}
+function show(view) { ['home', 'host', 'guest'].forEach(v => $(v).classList.toggle('hidden', v !== view)); }
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+function copyText(t) {
+  if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(t).then(() => true, () => legacyCopy(t));
+  return Promise.resolve(legacyCopy(t));
+}
+function legacyCopy(t) {
+  const ta = document.createElement('textarea'); ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select(); let ok = false; try { ok = document.execCommand('copy'); } catch (e) {} ta.remove(); return ok;
+}
+function download(name, html) {
+  const blob = new Blob([html], { type: 'text/html' }); const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 2000);
+}
+function hasPeer() { if (typeof Peer === 'undefined') { toast('PeerJS failed to load. Check your connection and reload.', 'bad', 6000); return false; } return true; }
+
+/* ====================================================================
+   HOST
+   ==================================================================== */
+const H = { live: false, code: '', peer: null, conns: new Map(), hub: null, pro: false, dirty: true, anim: {}, qsTimers: new Map(), startedAt: 0, title: '' };
+
+function refreshPlan() {
+  const p = PV.plan(H.pro);
+  $('hPlan').textContent = p.name; $('hPlan').classList.toggle('pro', H.pro);
+  if (H.hub) H.hub.maxGuests = p.maxGuests;
+  $('btnLicense').textContent = H.pro ? 'Pro ✓' : 'Enter license';
+}
+async function loadCachedLicense() {
+  const cached = store.get('license');
+  if (!cached || !cached.key) return;
+  // AIDEV-NOTE: validate once at session creation; cache result in pv.license.
+  const r = await PV.license.verify(cached.key);
+  H.pro = !!r.ok; store.set('license', { key: cached.key, ok: r.ok, reason: r.reason || null, checkedAt: now() });
+  refreshPlan();
+}
+
+function newSession() {
+  if (!hasPeer()) return;
+  loadCachedLicense().then(startHost);
+}
+function startHost(attempt) {
+  attempt = attempt || 0;
+  H.code = PV.roomCode();
+  const peer = new Peer(PV.peerIdFor(H.code), PEER_OPTS());
+  H.peer = peer;
+  peer.once('open', () => {
+    H.hub = PV.createHub({ maxGuests: PV.plan(H.pro).maxGuests, now: now() });
+    H.startedAt = now(); H.live = true; H.title = 'Session ' + H.code;
+    H.conns.clear();
+    show('host'); refreshPlan(); renderJoin(); renderActs(); renderStage(); renderQa();
+    toast('Session ' + H.code + ' is live', 'ok');
+    requestAnimationFrame(drawLoop);
+  });
+  peer.on('connection', onGuestConn);
+  peer.on('error', e => {
+    if (e.type === 'unavailable-id' && attempt < 3) { peer.destroy(); startHost(attempt + 1); return; }
+    if (!H.live) { toast('Could not reach the signaling server (' + e.type + '). Try again.', 'bad', 6000); peer.destroy(); return; }
+    if (e.type !== 'peer-unavailable') toast('Connection issue: ' + e.type, 'warn');
+  });
+  peer.on('disconnected', () => { if (H.live && !peer.destroyed) { try { peer.reconnect(); } catch (e) {} } });
+}
+
+function onGuestConn(conn) {
+  const pid = conn.peer;
+  conn.on('open', () => {
+    if (!H.live) { conn.close(); return; }
+    if (!H.hub.addGuest(pid, now())) {
+      // AIDEV-NOTE: room full is visible feedback, never a silent drop.
+      try { conn.send({ t: 'full' }); } catch (e) {}
+      setTimeout(() => conn.close(), 500); toast('A guest was turned away: room is full (' + H.hub.maxGuests + ')', 'warn'); return;
+    }
+    H.conns.set(pid, conn); renderGuests();
+  });
+  conn.on('data', data => { if (!H.live || !H.conns.has(pid)) return; applyEffects(H.hub.handle(pid, data, now())); });
+  const bye = () => { H.conns.delete(pid); if (H.hub) H.hub.removeGuest(pid); renderGuests(); };
+  conn.on('close', bye); conn.on('error', bye);
+}
+function sendTo(pid, msg) { const c = H.conns.get(pid); if (c && c.open) { try { c.send(msg); } catch (e) {} } }
+function broadcast(msg) { H.conns.forEach(c => { if (c.open) { try { c.send(msg); } catch (e) {} } }); }
+function applyEffects(res) {
+  for (const ef of res.effects) {
+    if (ef.kind === 'send') sendTo(ef.to, ef.msg);
+    else if (ef.kind === 'changed') { H.dirty = true; renderCount(); scheduleActs(); }
+    else if (ef.kind === 'qs') { renderCount(); scheduleActs(); scheduleQs(ef.a); }
+    else if (ef.kind === 'rx') floatEmoji(ef.e);
+  }
+}
+// AIDEV-NOTE: Q&A snapshots are coalesced to 1 Hz per activity — never per-message fan-out.
+function scheduleQs(aid) {
+  renderQa();
+  if (H.qsTimers.has(aid)) return;
+  H.qsTimers.set(aid, setTimeout(() => {
+    H.qsTimers.delete(aid);
+    const a = H.hub.getActivity(aid); if (a) broadcast(H.hub.qsMsg(a));
+  }, 1000));
+}
+let actsTimer = null;
+function scheduleActs() { if (actsTimer) return; actsTimer = setTimeout(() => { actsTimer = null; if (H.live) renderActs(); }, 400); }
+function floatEmoji(e) {
+  const box = $('rx'); if (box.childElementCount > 60) return;
+  const s = el('span', '', e); s.style.left = (5 + Math.random() * 90) + '%'; s.style.setProperty('--r', (Math.random() * 40 - 20) + 'deg');
+  box.appendChild(s); setTimeout(() => s.remove(), 3300);
+}
+
+/* ---------- host rendering ---------- */
+function joinUrl() { return location.origin.replace(/^null$/, 'file://') + location.pathname + '?j=' + H.code; }
+function renderJoin() {
+  $('hCode').textContent = H.code; $('hUrl').textContent = joinUrl();
+  const box = $('qr'); clear(box);
+  if (typeof qrcode !== 'undefined') {
+    try { const q = qrcode(0, 'M'); q.addData(joinUrl()); q.make(); box.innerHTML = q.createSvgTag({ cellSize: 4, margin: 0, scalable: true }); } // AIDEV-NOTE: library output from our own URL, no peer data
+    catch (e) { box.appendChild(el('div', 'muted', 'QR unavailable')); }
+  } else box.appendChild(el('div', 'muted', 'QR unavailable'));
+  $('btnShare').classList.toggle('hidden', !navigator.share);
+}
+function renderGuests() { $('hGuests').textContent = H.hub.guests.size + ' guest' + (H.hub.guests.size === 1 ? '' : 's') + ' · ' + H.hub.maxGuests + ' max'; }
+function renderActs() {
+  const box = $('acts'); clear(box);
+  const plan = PV.plan(H.pro);
+  $('actCount').textContent = H.hub.activities.length + (isFinite(plan.maxActivities) ? ' / ' + plan.maxActivities : '');
+  H.hub.activities.forEach((a, i) => {
+    const row = el('div', 'act' + (a.id === H.hub.activeId ? ' active' : ''));
+    const t = el('div', 't'); t.appendChild(el('div', 'k', ({ poll: 'Poll', cloud: 'Word cloud', qa: 'Q&A', rating: 'Rating' })[a.kind] + (a.closed ? ' · closed' : '') + (a.kind === 'qa' ? ' · ' + a.questions.length : ' · ' + a.votes.size)));
+    t.appendChild(el('div', '', a.title)); row.appendChild(t);
+    const up = el('button', 'small ghost', '↑'); up.title = 'Move up'; up.disabled = i === 0; up.onclick = () => { H.hub.move(a.id, -1); renderActs(); };
+    const dn = el('button', 'small ghost', '↓'); dn.title = 'Move down'; dn.disabled = i === H.hub.activities.length - 1; dn.onclick = () => { H.hub.move(a.id, 1); renderActs(); };
+    const st = el('button', 'small' + (a.id === H.hub.activeId ? '' : ' primary'), a.id === H.hub.activeId ? 'Live' : 'Start'); st.disabled = a.id === H.hub.activeId;
+    st.onclick = () => activate(a.id);
+    row.append(up, dn, st); box.appendChild(row);
+  });
+}
+function activate(id) {
+  H.hub.activate(id, now()); H.dirty = true; H.anim = {};
+  broadcast(H.hub.stateMsg());
+  const a = H.hub.active(); if (a.kind === 'qa') broadcast(H.hub.qsMsg(a));
+  renderActs(); renderStage(); renderQa();
+}
+function renderStage() {
+  const a = H.hub.active();
+  $('stEmpty').classList.toggle('hidden', !!a);
+  $('stTitle').textContent = a ? a.title : '';
+  const c = $('stControls'); clear(c);
+  if (!a) return;
+  renderCount();
+  if (!a.closed) { const b = el('button', '', 'Close voting'); b.onclick = () => { H.hub.close(); broadcast(H.hub.stateMsg()); renderActs(); renderStage(); }; c.appendChild(b); }
+  else { const b = el('button', '', 'Reopen'); b.onclick = () => { a.closed = false; broadcast(H.hub.stateMsg()); renderActs(); renderStage(); }; c.appendChild(b); }
+  if (a.kind !== 'qa') {
+    const r = el('button', a.revealed ? '' : 'primary', a.revealed ? 'Results shown to guests' : 'Reveal results to guests'); r.disabled = a.revealed;
+    r.onclick = () => { a.revealed = true; broadcast({ t: 'reveal', a: a.id, agg: PV.aggregate(a) }); renderStage(); };
+    c.appendChild(r);
+  }
+  const d = el('button', 'ghost', 'Remove'); d.onclick = () => { if (confirm('Remove "' + a.title + '" and its responses?')) { H.hub.removeActivity(a.id); broadcast(H.hub.stateMsg()); H.dirty = true; renderActs(); renderStage(); renderQa(); } };
+  c.appendChild(d);
+}
+function renderCount() { const a = H.hub.active(); $('stCount').textContent = a ? (a.kind === 'qa' ? a.questions.length + ' questions' : a.votes.size + ' responses') : ''; }
+function renderQa() {
+  const a = H.hub.active(); const list = $('qaList'); clear(list);
+  const qa = a && a.kind === 'qa' ? a : H.hub.activities.filter(x => x.kind === 'qa').pop();
+  $('qaHint').classList.toggle('hidden', !!qa);
+  $('qaCount').textContent = qa ? qa.questions.filter(q => !q.hidden).length : '';
+  if (!qa) return;
+  qa.questions.filter(q => !q.hidden).sort((x, y) => y.up.size - x.up.size || x.t - y.t).forEach(q => {
+    const row = el('div', 'q' + (q.ans ? ' ans' : ''));
+    row.appendChild(el('div', 'up', '▲ ' + q.up.size));
+    const t = el('div', 'txt'); t.appendChild(el('div', '', q.txt)); t.appendChild(el('div', 'n', q.n)); row.appendChild(t); // AIDEV-NOTE: textContent only, peer strings never hit innerHTML
+    const b = el('div', 'btns');
+    const ans = el('button', 'small', q.ans ? 'Unmark' : 'Mark answered'); ans.onclick = () => { H.hub.markAnswered(qa.id, q.qid); scheduleQs(qa.id); };
+    const hide = el('button', 'small ghost', 'Hide'); hide.onclick = () => { H.hub.hideQuestion(qa.id, q.qid); scheduleQs(qa.id); };
+    b.append(ans, hide); row.appendChild(b); list.appendChild(row);
+  });
+}
+
+/* ---------- canvas live view (uses the same layout fns as the recap) ---------- */
+function drawLoop() {
+  if (!H.live) return;
+  const cv = $('stage'); const rect = cv.getBoundingClientRect(); const dpr = window.devicePixelRatio || 1;
+  const w = Math.max(1, Math.round(rect.width)), h = Math.max(1, Math.round(rect.height));
+  if (cv.width !== w * dpr || cv.height !== h * dpr) { cv.width = w * dpr; cv.height = h * dpr; H.dirty = true; }
+  const ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const a = H.hub.active();
+  let animating = false;
+  if (a) {
+    ctx.clearRect(0, 0, w, h);
+    const top = 64;
+    if (a.kind === 'poll') animating = drawBars(ctx, a, w, h, top);
+    else if (a.kind === 'rating') animating = drawDist(ctx, a, w, h, top);
+    else if (a.kind === 'cloud') drawCloud(ctx, a, w, h, top);
+    else if (a.kind === 'qa') { ctx.fillStyle = '#8b93a7'; ctx.font = '500 20px ' + FONT; ctx.textAlign = 'center'; ctx.fillText(a.questions.length ? 'Questions are on the right →' : 'Waiting for questions…', w / 2, h / 2); }
+    H.dirty = animating;
+  } else ctx.clearRect(0, 0, w, h);
+  requestAnimationFrame(drawLoop);
+}
+const FONT = 'ui-sans-serif,-apple-system,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif';
+function ease(key, target) { const cur = H.anim[key] == null ? 0 : H.anim[key]; const nx = cur + (target - cur) * 0.18; H.anim[key] = Math.abs(nx - target) < 0.3 ? target : nx; return H.anim[key]; }
+function drawBars(ctx, a, w, h, top) {
+  const agg = PV.aggregate(a); const L = PV.layoutBars(a.opts, agg.counts, w, h - top);
+  let anim = false;
+  ctx.textBaseline = 'middle';
+  L.rows.forEach((r, i) => {
+    const bw = ease('b' + i, r.w); if (bw !== r.w) anim = true;
+    ctx.fillStyle = r.win ? '#fff' : '#c7cbd6'; ctx.font = (r.win ? '700 ' : '500 ') + Math.min(20, r.rowH * 0.36) + 'px ' + FONT; ctx.textAlign = 'left';
+    ctx.fillText(fit(ctx, r.label, r.x - r.labelX - 12), r.labelX, top + r.y + r.h / 2);
+    ctx.fillStyle = r.color; ctx.globalAlpha = r.win || !L.total ? 1 : 0.55;
+    rrect(ctx, r.x, top + r.y, Math.max(3, bw), r.h, 8); ctx.fill(); ctx.globalAlpha = 1;
+    ctx.fillStyle = '#e9ecf3'; ctx.font = '600 15px ' + FONT;
+    ctx.fillText(r.count + ' · ' + Math.round(r.pct * 100) + '%' + (r.win ? ' ★' : ''), r.x + Math.max(3, bw) + 10, top + r.y + r.h / 2);
+  });
+  return anim;
+}
+function drawDist(ctx, a, w, h, top) {
+  const agg = PV.aggregate(a); const L = PV.layoutDist(agg.counts, w, h - top);
+  let anim = false;
+  L.bars.forEach((b, i) => {
+    const bh = ease('d' + i, b.h); if (bh !== b.h) anim = true;
+    ctx.fillStyle = b.color; rrect(ctx, b.x, top + (h - top) - 40 - bh, b.w, Math.max(3, bh), 8); ctx.fill();
+    ctx.fillStyle = '#c7cbd6'; ctx.font = '600 16px ' + FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(b.label, b.x + b.w / 2, h - 14); ctx.fillText(String(b.count), b.x + b.w / 2, top + (h - top) - 46 - bh);
+  });
+  ctx.fillStyle = '#fff'; ctx.font = '700 26px ' + FONT; ctx.textAlign = 'right';
+  ctx.fillText(L.total ? 'avg ' + L.avg.toFixed(2) : '', w - 18, top + 4);
+  return anim;
+}
+function drawCloud(ctx, a, w, h, top) {
+  // AIDEV-NOTE: seed = hash(activity id) — identical in the recap SVG. Layout is
+  // cached and only recomputed when votes change (H.dirty) or the canvas resizes.
+  const key = a.id + ':' + w + 'x' + h;
+  if (H.dirty || !H.cloud || H.cloud.key !== key) H.cloud = { key, L: PV.layoutWordCloud(PV.aggregate(a).words, w, h - top, PV.hashSeed(a.id)) };
+  const L = H.cloud.L;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  L.forEach(p => { ctx.fillStyle = p.color; ctx.font = '700 ' + p.size + 'px ' + FONT; ctx.fillText(p.text, p.cx, top + p.cy); });
+  if (!L.length) { ctx.fillStyle = '#8b93a7'; ctx.font = '500 20px ' + FONT; ctx.fillText('Waiting for words…', w / 2, h / 2); }
+}
+function rrect(ctx, x, y, w, h, r) { r = Math.min(r, h / 2, w / 2); ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+function fit(ctx, s, maxW) { if (ctx.measureText(s).width <= maxW) return s; while (s.length > 1 && ctx.measureText(s + '…').width > maxW) s = s.slice(0, -1); return s + '…'; }
+
+/* ---------- add activity ---------- */
+$('btnAdd').onclick = () => {
+  const plan = PV.plan(H.pro);
+  if (H.hub.activities.length >= plan.maxActivities) { toast('Free plan: ' + plan.maxActivities + ' activities per session. Unlock unlimited + Instant Recap with Pro.', 'warn', 5000); return; }
+  $('aTitle').value = ''; $('aOpts').value = ''; $('aKind').value = 'poll'; $('aOptsWrap').classList.remove('hidden');
+  $('addModal').classList.remove('hidden'); $('aTitle').focus();
+};
+$('aKind').onchange = () => $('aOptsWrap').classList.toggle('hidden', $('aKind').value !== 'poll');
+$('addCancel').onclick = () => $('addModal').classList.add('hidden');
+$('addForm').onsubmit = e => {
+  e.preventDefault();
+  const kind = $('aKind').value, title = $('aTitle').value.trim();
+  if (H.hub.activities.length >= PV.plan(H.pro).maxActivities) { $('addModal').classList.add('hidden'); $('btnAdd').onclick(); return; }
+  let opts;
+  if (kind === 'poll') {
+    opts = $('aOpts').value.split('\n').map(s => s.trim()).filter(Boolean);
+    if (opts.length < 2) { toast('A poll needs at least 2 options', 'warn'); return; }
+    if (opts.length > PV.LIMITS.optMax) { toast('Max ' + PV.LIMITS.optMax + ' options', 'warn'); return; }
+  }
+  const a = H.hub.addActivity({ kind, title, opts });
+  $('addModal').classList.add('hidden'); renderActs();
+  if (!H.hub.activeId) activate(a.id);
+};
+
+/* ---------- header actions ---------- */
+$('btnCopy').onclick = () => copyText(joinUrl()).then(ok => toast(ok ? 'Link copied' : 'Copy failed — select the link manually', ok ? 'ok' : 'warn'));
+$('btnShare').onclick = () => { if (navigator.share) navigator.share({ title: 'Join my popvote session', url: joinUrl() }).catch(() => {}); };
+window.addEventListener('beforeunload', e => { if (H.live) { e.preventDefault(); e.returnValue = 'Session is live — leaving ends it'; return e.returnValue; } });
+
+/* ---------- license ---------- */
+$('btnLicense').onclick = openLicense;
+$('btnHaveKey').onclick = () => { $('endModal').classList.add('hidden'); openLicense(); };
+$('licCancel').onclick = () => $('licModal').classList.add('hidden');
+function openLicense() { $('licKey').value = (store.get('license') || {}).key || ''; $('licMsg').textContent = ''; $('licModal').classList.remove('hidden'); $('licKey').focus(); }
+$('licForm').onsubmit = async e => {
+  e.preventDefault();
+  const key = $('licKey').value.trim();
+  const r = await PV.license.verify(key);
+  const why = { format: 'That does not look like a popvote license key.', signature: 'Signature check failed — the key was altered or is not genuine.', expired: 'This license has expired.', plan: 'This key is not a Pro license.', unsupported: 'Your browser cannot verify keys offline (needs WebCrypto Ed25519).' };
+  if (!r.ok) { $('licMsg').textContent = why[r.reason] || 'Invalid license.'; return; }
+  store.set('license', { key, ok: true, reason: null, checkedAt: now() });
+  H.pro = true; refreshPlan(); if (H.hub) renderActs(), renderGuests();
+  $('licModal').classList.add('hidden'); toast('Pro unlocked for ' + (r.payload.email || 'this browser'), 'ok', 5000);
+};
+
+/* ---------- end session + recap ---------- */
+function sessionSnapshot() { return H.hub.export({ title: H.title, code: H.code, endedAt: now() }); }
+$('btnEnd').onclick = () => {
+  const S = sessionSnapshot();
+  $('endSummary').textContent = S.activities.length + ' activities · ' + S.activities.reduce((n, a) => n + a.responses, 0) + ' responses · peak ' + S.peak + ' guests';
+  const html = PV.buildRecap(S);
+  $('recapPro').classList.toggle('hidden', !H.pro); $('recapFree').classList.toggle('hidden', H.pro);
+  ($('recapPreview')).srcdoc = html; ($('recapPreviewFree')).srcdoc = html; // AIDEV-NOTE: sandboxed, no scripts in recap anyway
+  $('endModal').classList.remove('hidden');
+};
+$('endCancel').onclick = () => $('endModal').classList.add('hidden');
+$('btnRecap').onclick = () => { const S = sessionSnapshot(); download(PV.recapFilename(S), PV.buildRecap(S)); toast('Recap downloaded', 'ok'); endSession(); };
+$('btnEndNoRecap').onclick = endSession; $('btnEndFree').onclick = endSession;
+function endSession() {
+  $('endModal').classList.add('hidden');
+  broadcast({ t: 'end' }); H.live = false;
+  setTimeout(() => { try { H.peer.destroy(); } catch (e) {} }, 400);
+  H.conns.clear(); H.hub = null; show('home'); history.replaceState(null, '', location.pathname);
+}
+
+/* ====================================================================
+   GUEST
+   ==================================================================== */
+const G = { code: '', peer: null, conn: null, act: null, closed: false, myVotes: {}, myUps: new Set(), qs: [], reveal: null, retryPending: false, attempts: 0, ended: false, lastRx: 0, lastVote: 0, name: store.get('name', '') };
+
+function joinSession(code) {
+  code = PV.normalizeCode(code);
+  if (!PV.isValidCode(code)) { toast('Enter the 4-letter room code', 'warn'); return; }
+  if (!hasPeer()) return;
+  G.code = code; show('guest'); renderRxBar(); setStatus('Connecting…');
+  history.replaceState(null, '', location.pathname + '?j=' + code);
+  const peer = new Peer(undefined, PEER_OPTS()); G.peer = peer;
+  peer.once('open', () => connectToHost());
+  peer.on('error', e => {
+    if (e.type === 'peer-unavailable') { setStatus('Room ' + code + ' not found'); guestMessage('No session with code ' + code + '. Check the code with your host.'); return; }
+    if (!G.conn || !G.conn.open) scheduleReconnect();
+  });
+  peer.on('disconnected', () => { if (!G.ended && !peer.destroyed) { try { peer.reconnect(); } catch (e) {} } });
+}
+function connectToHost() {
+  if (G.ended) return;
+  const conn = G.peer.connect(PV.peerIdFor(G.code), { reliable: true }); G.conn = conn;
+  conn.on('open', () => {
+    G.attempts = 0; setStatus('Connected · ' + G.code);
+    conn.send({ t: 'hi', n: G.name || undefined });
+  });
+  conn.on('data', d => { let m; try { m = JSON.parse(PV.normalizeMsg(d)); } catch (e) { return; } onHostMsg(m); });
+  conn.on('close', () => { if (!G.ended) { setStatus('Disconnected — reconnecting…'); scheduleReconnect(); } });
+  conn.on('error', () => { if (!G.ended) scheduleReconnect(); });
+}
+// AIDEV-NOTE: retryPending guard + capped backoff; a storm of close/error events
+// must schedule exactly one reconnect.
+function scheduleReconnect() {
+  if (G.retryPending || G.ended) return;
+  if (G.attempts >= 6) { setStatus('Could not reconnect'); guestMessage('Lost the connection to the host. Reload the page to try again.'); return; }
+  G.retryPending = true;
+  const wait = Math.min(15000, 1000 * Math.pow(2, G.attempts++));
+  setTimeout(() => { G.retryPending = false; if (G.peer.disconnected) { try { G.peer.reconnect(); } catch (e) {} } connectToHost(); }, wait);
+}
+function gsend(m) { if (G.conn && G.conn.open) { try { G.conn.send(m); return true; } catch (e) {} } toast('Not connected yet', 'warn'); return false; }
+function setStatus(s) { $('gStatus').textContent = s; }
+function guestMessage(s) { const m = $('gMain'); clear(m); m.appendChild(el('div', 'muted', s)); }
+
+function onHostMsg(m) {
+  if (!m || typeof m !== 'object') return;
+  switch (m.t) {
+    case 'state':
+      G.act = m.act; G.closed = !!m.closed; G.qs = []; G.reveal = null; renderGuest();
+      // AIDEV-NOTE: after a rejoin the host re-sends state; re-sending our vote is idempotent (hub replaces).
+      if (m.act && G.myVotes[m.act.id] !== undefined && !m.closed) gsend({ t: 'vote', a: m.act.id, v: G.myVotes[m.act.id] });
+      break;
+    case 'reveal': if (G.act && m.a === G.act.id) { G.reveal = m.agg; renderGuest(); } break;
+    case 'qs': if (G.act && m.a === G.act.id) { G.qs = Array.isArray(m.list) ? m.list : []; renderQs(); } break;
+    case 'full': G.ended = true; setStatus('Room full'); guestMessage('This room is full (' + 'the host has reached the guest limit). Ask the host to upgrade or try again later.'); break;
+    case 'end': G.ended = true; setStatus('Session ended'); guestMessage('The host ended the session. Thanks for taking part!'); try { G.peer.destroy(); } catch (e) {} break;
+  }
+}
+function vote(v) {
+  const t = now(); if (t - G.lastVote < 250) { toast('Slow down 🙂', 'warn', 1200); return; } G.lastVote = t;
+  G.myVotes[G.act.id] = v; if (gsend({ t: 'vote', a: G.act.id, v })) renderGuest();
+}
+function renderGuest() {
+  const m = $('gMain'); clear(m);
+  if (!G.act) { m.appendChild(el('div', 'muted', 'You are in. Waiting for the host to start an activity…')); return; }
+  const a = G.act; const mine = G.myVotes[a.id];
+  m.appendChild(el('h2', '', a.title));
+  if (G.closed) m.appendChild(el('div', 'muted', 'Voting is closed.'));
+  if (a.kind === 'poll') {
+    const box = el('div', 'opts');
+    (a.opts || []).forEach((o, i) => { const b = el('button', mine === i ? 'sel' : '', o); b.disabled = G.closed; b.onclick = () => vote(i); box.appendChild(b); });
+    m.appendChild(box);
+    if (mine !== undefined) m.appendChild(el('div', 'muted', 'Your vote is in. Tap another option to change it.'));
+  } else if (a.kind === 'rating') {
+    const box = el('div', 'ratings');
+    for (let i = 1; i <= 5; i++) { const b = el('button', mine === i ? 'sel' : '', String(i)); b.disabled = G.closed; b.onclick = () => vote(i); box.appendChild(b); }
+    m.appendChild(box);
+  } else if (a.kind === 'cloud') {
+    const f = el('form'); const inp = el('input'); inp.maxLength = PV.LIMITS.wordMax; inp.placeholder = 'One word or short phrase'; inp.value = mine || ''; inp.disabled = G.closed;
+    const b = el('button', 'primary', mine ? 'Change' : 'Send'); b.style.marginTop = '10px'; b.disabled = G.closed;
+    f.append(inp, b); f.onsubmit = e => { e.preventDefault(); const w = PV.normalizeWord(inp.value); if (w) vote(w); };
+    m.appendChild(f);
+    if (mine) m.appendChild(el('div', 'muted', 'Sent: ' + mine));
+  } else if (a.kind === 'qa') {
+    const f = el('form');
+    const ta = el('textarea'); ta.rows = 2; ta.maxLength = PV.LIMITS.qTextUi; ta.placeholder = 'Ask a question…'; ta.disabled = G.closed;
+    const nameIn = el('input'); nameIn.maxLength = PV.LIMITS.nameMax; nameIn.placeholder = 'Your name (optional)'; nameIn.value = G.name; nameIn.style.marginTop = '8px'; // AIDEV-NOTE: lazy name collection
+    const b = el('button', 'primary', 'Ask'); b.style.marginTop = '8px'; b.disabled = G.closed;
+    f.append(ta, nameIn, b);
+    f.onsubmit = e => { e.preventDefault(); const txt = ta.value.trim(); if (!txt) return; G.name = nameIn.value.trim().slice(0, PV.LIMITS.nameMax); store.set('name', G.name); if (gsend({ t: 'q', a: a.id, txt, n: G.name || 'Anonymous' })) { ta.value = ''; toast('Question sent', 'ok'); } };
+    m.appendChild(f);
+    const list = el('div', 'qlist'); list.id = 'gQs'; list.style.marginTop = '14px'; m.appendChild(list); renderQs();
+  }
+  if (G.reveal) renderReveal(m, a, G.reveal);
+}
+function renderQs() {
+  const list = $('gQs'); if (!list) return; clear(list);
+  G.qs.slice().sort((x, y) => y.up - x.up).forEach(q => {
+    const row = el('div', 'q' + (q.ans ? ' ans' : ''));
+    const up = el('button', 'up', '▲ ' + q.up); up.disabled = G.myUps.has(q.qid); up.onclick = () => { G.myUps.add(q.qid); up.disabled = true; gsend({ t: 'up', a: G.act.id, qid: q.qid }); };
+    const t = el('div', 'txt'); t.appendChild(el('div', '', q.txt)); t.appendChild(el('div', 'n', q.n + (q.ans ? ' · answered' : '')));
+    row.append(up, t); list.appendChild(row);
+  });
+}
+function renderReveal(m, a, agg) {
+  const box = el('div', 'result'); box.style.marginTop = '16px'; box.appendChild(el('h3', '', 'Results'));
+  if (a.kind === 'poll' && agg.counts) {
+    const max = Math.max(1, ...agg.counts);
+    a.opts.forEach((o, i) => { const r = el('div', 'bar'); const i2 = el('i'); i2.style.width = Math.round(100 * agg.counts[i] / max) + '%'; i2.style.maxWidth = '60%'; r.append(el('span', '', o + ' · ' + agg.counts[i]), i2); box.appendChild(r); });
+  } else if (a.kind === 'rating' && agg.counts) {
+    box.appendChild(el('div', '', 'Average ' + (agg.avg || 0).toFixed(2) + ' / 5 · ' + agg.total + ' ratings'));
+    const max = Math.max(1, ...agg.counts);
+    agg.counts.forEach((c, i) => { const r = el('div', 'bar'); const i2 = el('i'); i2.style.width = Math.round(100 * c / max) + '%'; i2.style.maxWidth = '60%'; r.append(el('span', '', (i + 1) + ' · ' + c), i2); box.appendChild(r); });
+  } else if (a.kind === 'cloud' && agg.words) {
+    const c = el('div', 'cloudmini'); const max = agg.words.length ? agg.words[0].count : 1;
+    agg.words.slice(0, 40).forEach((w, i) => { const s = el('span', '', w.text); s.style.fontSize = (13 + 18 * w.count / max) + 'px'; s.style.color = PV.PALETTE[i % PV.PALETTE.length]; s.style.fontWeight = '700'; c.appendChild(s); });
+    box.appendChild(c);
+  }
+  m.appendChild(box);
+}
+function renderRxBar() {
+  const bar = $('gRx'); clear(bar);
+  PV.REACTIONS.forEach(e => { const b = el('button', '', e); b.onclick = () => { const t = now(); if (t - G.lastRx < 1000) return; G.lastRx = t; gsend({ t: 'rx', e }); b.style.transform = 'scale(1.3)'; setTimeout(() => b.style.transform = '', 150); }; bar.appendChild(b); });
+}
+
+/* ====================================================================
+   boot
+   ==================================================================== */
+$('btnNew').onclick = newSession;
+$('joinForm').onsubmit = e => { e.preventDefault(); joinSession($('joinCode').value); };
+$('joinCode').oninput = () => { $('joinCode').value = $('joinCode').value.toUpperCase().slice(0, 4); };
+const params = new URLSearchParams(location.search);
+if (params.get('j')) joinSession(params.get('j'));
+else if (store.usingMemory) toast('Storage is blocked here; settings will not persist.', 'warn', 4000);
+})();
+</script>
+</body>
+</html>
