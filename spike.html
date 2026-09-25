@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>SPIKE</title>
+</head>
+<body>
+<pre id="results">running...</pre>
+<a id="dl" download="popvote-recap-spike.html">download recap</a>
+<iframe id="preview" style="width:100%;height:400px;border:1px solid #ccc"></iframe>
+<script>
+(function () {
+  'use strict';
+
+  // ================= shared helpers =================
+
+  // AIDEV: mulberry32 - small deterministic PRNG, no external deps
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function rectOverlap(a, b) {
+    return !(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y);
+  }
+
+  function escapeXml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  // ================= EXPERIMENT 1: BURST FAN-IN =================
+
+  function createHub() {
+    const votes = new Map(); // activityId -> Map<pid, value>
+    const rate = new Map();  // pid -> [timestamps within last 1s]
+    let oversizeDropped = 0;
+    let rateLimitedDropped = 0;
+
+    function handle(pid, rawMsg, now) {
+      let text;
+      let byteLen;
+      if (rawMsg instanceof ArrayBuffer) {
+        byteLen = rawMsg.byteLength;
+        text = new TextDecoder().decode(rawMsg);
+      } else {
+        text = rawMsg;
+        byteLen = new TextEncoder().encode(text).length;
+      }
+      // AIDEV: size check happens before rate-limit token consumption -
+      // oversize junk should not eat into a guest's legit rate budget.
+      if (byteLen > 2048) { oversizeDropped++; return false; }
+
+      let arr = rate.get(pid);
+      if (!arr) { arr = []; rate.set(pid, arr); }
+      while (arr.length && now - arr[0] > 1000) arr.shift();
+      if (arr.length >= 5) { rateLimitedDropped++; return false; }
+      arr.push(now);
+
+      let msg;
+      try { msg = JSON.parse(text); } catch (e) { return false; }
+      if (msg && msg.t === 'vote') {
+        let m = votes.get(msg.a);
+        if (!m) { m = new Map(); votes.set(msg.a, m); }
+        m.set(pid, msg.v); // revote replaces prior value
+        return true;
+      }
+      return false;
+    }
+
+    return {
+      handle,
+      votes,
+      get oversizeDropped() { return oversizeDropped; },
+      get rateLimitedDropped() { return rateLimitedDropped; }
+    };
+  }
+
+  function runBurst(cb) {
+    const hub = createHub();
+    const N = 100;
+    const windowMs = 2000;
+
+    // AIDEV: ticker uses setTimeout(0), not rAF, so it works with
+    // headless Chrome's --virtual-time-budget clock.
+    let lastTick = performance.now();
+    let worstGap = 0;
+    let tickerActive = true;
+    function tick() {
+      const now = performance.now();
+      const gap = now - lastTick;
+      if (gap > worstGap) worstGap = gap;
+      lastTick = now;
+      if (tickerActive) setTimeout(tick, 0);
+    }
+    setTimeout(tick, 0);
+
+    let sentCount = 0;
+    let totalScheduled = 0;
+    let finished = false;
+
+    function schedule(pid, payload, asBuffer, delay) {
+      totalScheduled++;
+      setTimeout(function () {
+        const now = performance.now();
+        const str = JSON.stringify(payload);
+        const raw = asBuffer ? new TextEncoder().encode(str).buffer : str;
+        hub.handle(pid, raw, now);
+        sentCount++;
+        maybeFinish();
+      }, delay);
+    }
+
+    for (let i = 0; i < N; i++) {
+      const pid = 'g' + i;
+      const asBuffer = (i % 10) < 3; // ~30%
+      const v = i % 4;
+      for (let k = 0; k < 4; k++) { // 1 initial vote + 3 revotes, same value
+        schedule(pid, { t: 'vote', a: 'p1', v: v }, asBuffer, Math.random() * windowMs);
+      }
+    }
+
+    for (let i = 0; i < 10; i++) { // oversized (3KB) junk, dropped by size
+      const big = 'x'.repeat(3000);
+      schedule('gBig' + i, { t: 'vote', a: 'p1', v: 0, pad: big }, false, Math.random() * windowMs);
+    }
+
+    for (let i = 0; i < 5; i++) { // spammers on a separate activity so p1 stays clean
+      const pid = 'spam' + i;
+      for (let k = 0; k < 20; k++) {
+        schedule(pid, { t: 'vote', a: 'spamActivity', v: 0 }, false, Math.random() * 100);
+      }
+    }
+
+    function maybeFinish() {
+      if (finished) return;
+      if (sentCount >= totalScheduled) {
+        finished = true;
+        setTimeout(finalize, 50); // settle past the 2s window
+      }
+    }
+
+    function finalize() {
+      tickerActive = false;
+      const t0 = performance.now();
+      const m = hub.votes.get('p1') || new Map();
+      const tally = [0, 0, 0, 0];
+      let sum = 0;
+      m.forEach(function (v) { tally[v]++; sum++; });
+      const aggregateMs = performance.now() - t0;
+      const distinctVoters = m.size;
+
+      const arr = [];
+      for (let i = 0; i < 100; i++) arr.push({ pid: 'g' + i, v: i % 4 });
+      const t1 = performance.now();
+      const stally = [0, 0, 0, 0];
+      for (let i = 0; i < arr.length; i++) stally[arr[i].v]++;
+      const syncLoopMs = performance.now() - t1;
+
+      const oversizeDropped = hub.oversizeDropped;
+      const rateLimitedDropped = hub.rateLimitedDropped;
+      const pass = distinctVoters === 100 && sum === 100 && worstGap < 50 && oversizeDropped === 10;
+
+      cb({
+        distinctVoters, tallySum: sum, tally,
+        worstGapMs: Number(worstGap.toFixed(3)),
+        aggregateMs: Number(aggregateMs.toFixed(3)),
+        syncLoopMs: Number(syncLoopMs.toFixed(3)),
+        oversizeDropped, rateLimitedDropped, pass
+      });
+    }
+  }
+
+  // ================= EXPERIMENT 2: RECAP DETERMINISM =================
+
+  function layoutWordCloud(words, w, h, seed) {
+    const rng = mulberry32(seed);
+    const cx = w / 2, cy = h / 2;
+    const counts = words.map(function (x) { return x.count; });
+    const minC = Math.min.apply(null, counts), maxC = Math.max.apply(null, counts);
+    function sizeFor(c) {
+      if (maxC === minC) return 39;
+      return 14 + (c - minC) / (maxC - minC) * (64 - 14);
+    }
+    const sorted = words.slice().sort(function (a, b) { return b.count - a.count; });
+    const startAngle = rng() * Math.PI * 2; // only randomness used, keeps layout deterministic per seed
+    const placed = [];
+
+    for (let idx = 0; idx < sorted.length; idx++) {
+      const word = sorted[idx];
+      const size = sizeFor(word.count);
+      const rw = 0.6 * size * word.text.length;
+      const rh = 1.1 * size;
+      let ok = false;
+      for (let step = 0; step < 2000; step++) {
+        const angle = startAngle + 0.2 * step;
+        const radius = step * 0.3; // Archimedean spiral: r grows linearly with step
+        const x = cx + radius * Math.cos(angle) - rw / 2;
+        const y = cy + radius * Math.sin(angle) - rh / 2;
+        if (x < 0 || y < 0 || x + rw > w || y + rh > h) continue;
+        const rect = { x, y, w: rw, h: rh };
+        let collide = false;
+        for (let j = 0; j < placed.length; j++) {
+          if (rectOverlap(rect, placed[j].rect)) { collide = true; break; }
+        }
+        if (!collide) {
+          placed.push({ text: word.text, size, rect });
+          ok = true;
+          break;
+        }
+      }
+      // AIDEV: word silently skipped if no free spot found in 2000 steps
+    }
+
+    return placed.map(function (p) {
+      return { text: p.text, x: p.rect.x + p.rect.w / 2, y: p.rect.y + p.rect.h / 2, size: p.size };
+    });
+  }
+
+  function svgBars(opts, counts, w, h) {
+    const max = Math.max.apply(null, counts.concat([1]));
+    const barH = Math.max(4, Math.floor((h - 20) / opts.length) - 4);
+    const winnerIdx = counts.indexOf(max);
+    let bars = '';
+    for (let i = 0; i < opts.length; i++) {
+      const val = counts[i];
+      const bw = (val / max) * (w - 120);
+      const y = 10 + i * (barH + 8);
+      const color = i === winnerIdx ? '#e63946' : '#457b9d';
+      bars += '<rect x="100" y="' + y + '" width="' + bw.toFixed(1) + '" height="' + barH + '" fill="' + color + '"/>';
+      bars += '<text x="95" y="' + (y + barH / 2 + 4) + '" font-size="12" text-anchor="end">' + escapeXml(opts[i]) + '</text>';
+      bars += '<text x="' + (105 + bw) + '" y="' + (y + barH / 2 + 4) + '" font-size="12">' + val + '</text>';
+    }
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '">' + bars + '</svg>';
+  }
+
+  function wordsToSvg(placed, w, h) {
+    let inner = '';
+    for (let i = 0; i < placed.length; i++) {
+      const p = placed[i];
+      inner += '<text x="' + p.x.toFixed(1) + '" y="' + p.y.toFixed(1) + '" font-size="' + p.size.toFixed(1) +
+        '" text-anchor="middle" dominant-baseline="middle">' + escapeXml(p.text) + '</text>';
+    }
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '">' + inner + '</svg>';
+  }
+
+  function sparkline(vals, w, h) {
+    const max = Math.max.apply(null, vals.concat([1]));
+    const step = w / (vals.length - 1);
+    const pts = vals.map(function (v, i) {
+      return (i * step).toFixed(1) + ',' + (h - (v / max) * h).toFixed(1);
+    }).join(' ');
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '"><polyline points="' + pts + '" fill="none" stroke="#333"/></svg>';
+  }
+
+  function buildSession(seed) {
+    const rng = mulberry32(seed);
+    const pollOptions = ['Cats', 'Dogs', 'Robots', 'Pineapple pizza'];
+    const pollCounts = [0, 0, 0, 0];
+    for (let i = 0; i < 50; i++) pollCounts[Math.floor(rng() * 4)]++;
+
+    const words = [];
+    for (let i = 0; i < 50; i++) words.push({ text: 'word' + i, count: 1 + Math.floor(rng() * 12) });
+
+    const ratingCounts = [0, 0, 0, 0, 0];
+    for (let i = 0; i < 40; i++) ratingCounts[Math.floor(rng() * 5)]++;
+
+    const qa = [];
+    for (let i = 0; i < 20; i++) qa.push({ q: 'Question ' + i + '?', upvotes: Math.floor(rng() * 30) });
+    qa.sort(function (a, b) { return b.upvotes - a.upvotes; });
+
+    return { pollOptions, pollCounts, words, ratingCounts, qa };
+  }
+
+  function generateRecap(session) {
+    const cloudW = 1100, cloudH = 600;
+    const placed = layoutWordCloud(session.words, cloudW, cloudH, 42);
+    const cloudSvg = wordsToSvg(placed, cloudW, cloudH);
+    const barsSvg = svgBars(session.pollOptions, session.pollCounts, 500, 220);
+    const ratingSvg = svgBars(['1', '2', '3', '4', '5'], session.ratingCounts, 400, 180);
+    const sparkSvg = sparkline(session.qa.map(function (x) { return x.upvotes; }), 300, 60);
+    const qaHtml = session.qa.map(function (x) {
+      return '<li>' + escapeXml(x.q) + ' <b>(' + x.upvotes + ')</b></li>';
+    }).join('');
+    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Popvote Recap</title>' +
+      '<style>body{font-family:sans-serif;margin:20px}.section{margin-bottom:24px}h2{border-bottom:1px solid #ccc}</style>' +
+      '</head><body><h1>Session Recap</h1>' +
+      '<div class="section"><h2>Poll</h2>' + barsSvg + '</div>' +
+      '<div class="section"><h2>Word Cloud</h2>' + cloudSvg + '</div>' +
+      '<div class="section"><h2>Ratings</h2>' + ratingSvg + '</div>' +
+      '<div class="section"><h2>Engagement</h2>' + sparkSvg + '</div>' +
+      '<div class="section"><h2>Q&amp;A</h2><ol>' + qaHtml + '</ol></div>' +
+      '<footer>Made with popvote</footer></body></html>';
+  }
+
+  function runRecap() {
+    const session1 = buildSession(999);
+    const html1 = generateRecap(session1);
+    const session2 = buildSession(999); // rebuilt fresh, same seed -> must match
+    const html2 = generateRecap(session2);
+    const identical = html1 === html2;
+
+    const placed = layoutWordCloud(session1.words, 1100, 600, 42);
+    const rects = placed.map(function (p) {
+      const rw = 0.6 * p.size * p.text.length;
+      const rh = 1.1 * p.size;
+      return { x: p.x - rw / 2, y: p.y - rh / 2, w: rw, h: rh };
+    });
+    let overlaps = 0;
+    for (let i = 0; i < rects.length; i++) {
+      for (let j = i + 1; j < rects.length; j++) {
+        if (rectOverlap(rects[i], rects[j])) overlaps++;
+      }
+    }
+
+    const bytes = new TextEncoder().encode(html1).length;
+    const pass = identical && html1.indexOf('<svg') !== -1 && placed.length >= 45 && overlaps === 0;
+
+    const blob = new Blob([html1], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const dl = document.getElementById('dl');
+    dl.href = url;
+
+    const iframe = document.getElementById('preview');
+    iframe.srcdoc = html1;
+
+    return { identical, placed: placed.length, overlaps, bytes, pass };
+  }
+
+  // ================= DRIVER =================
+
+  function finish(output) {
+    document.getElementById('results').textContent = JSON.stringify(output, null, 2);
+    document.title = output.pass ? 'SPIKE PASS' : 'SPIKE FAIL';
+    window.SPIKE_DONE = true;
+  }
+
+  try {
+    runBurst(function (burstResult) {
+      try {
+        const recapResult = runRecap();
+        const pass = !!(burstResult.pass && recapResult.pass);
+        finish({ burst: burstResult, recap: recapResult, pass: pass, ua: navigator.userAgent });
+      } catch (e) {
+        finish({ burst: burstResult, recap: null, pass: false, error: String(e), ua: navigator.userAgent });
+      }
+    });
+  } catch (e) {
+    finish({ burst: null, recap: null, pass: false, error: String(e), ua: navigator.userAgent });
+  }
+})();
+</script>
+</body>
+</html>
